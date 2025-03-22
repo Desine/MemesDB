@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 
-ADD_MEME, ADD_COMMENT, ADD_COMMENT_TEXT = range(3)
+ADD_MEME, GET_USER_MEMES_BY_USERNAME_OR_ID, ADD_COMMENT_MEME_ID, ADD_COMMENT_TEXT = range(4)
 
 
 
@@ -97,15 +97,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     
 
-# Обработчик команды /add_meme
+# MEME
 async def add_meme_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'Формат: первая строка "кто придумал", вторая "шутка" (строкой считается текст до \\n).'
     )
     return ADD_MEME
 
-# Обработчик текстового сообщения для добавления шутки
-async def handle_meme(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_meme_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     lines = user_message.split('\n')
     
@@ -127,18 +126,74 @@ async def handle_meme(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+async def get_my_memes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    cursor.execute('SELECT text, created_at FROM Memes WHERE user_id = ?', (user_id,))
+    memes = cursor.fetchall()
+    
+    if not memes:
+        await update.message.reply_text("У вас нет добавленных мемов.")
+        return
+    
+    memes_list = "Ваши мемы:\n"
+    for meme in memes:
+        memes_list += f"Текст: {meme[0]}, Дата создания: {meme[1]}\n"
+    
+    await update.message.reply_text(memes_list)
+
+
+async def get_user_memes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Мемы какого пользователя показать? Введите Username или ID пользователя:")
+    return GET_USER_MEMES_BY_USERNAME_OR_ID
+
+async def get_user_memes_by_username_or_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text.strip()
+
+    # ищем по user_id
+    if user_input.isdigit():
+        user_id = int(user_input)
+        cursor.execute('SELECT text, created_at FROM Memes WHERE user_id = ?', (user_id,))
+    else:
+        # ищем по username
+        cursor.execute('SELECT id FROM Users WHERE username = ?', (user_input,))
+        user_data = cursor.fetchone()
+        if not user_data:
+            await update.message.reply_text("Пользователь с таким username не найден.")
+            return ConversationHandler.END
+        user_id = user_data[0]
+        cursor.execute('SELECT text, created_at FROM Memes WHERE user_id = ?', (user_id,))
+
+    memes = cursor.fetchall()
+
+    if not memes:
+        await update.message.reply_text("У этого пользователя пока нет добавленных мемов.")
+        return ConversationHandler.END
+
+    # формируем мемы
+    memes_list = "Мемы этого пользователя:\n"
+    for meme in memes:
+        memes_list += f"Текст: {meme[0]}, Дата создания: {meme[1]}\n"
+
+    await update.message.reply_text(memes_list)
+    return ConversationHandler.END
+
+
+
+
+# COMMENT
 async def add_comment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Введите ID шутки, которую хотите прокомментировать:')
-    return ADD_COMMENT
+    return ADD_COMMENT_MEME_ID
 
 # Обработчик текстового сообщения для комментария
-async def handle_comment_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_comment_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     
     # Проверяем, является ли сообщение числом (ID шутки)
     if not user_message.isdigit():
         await update.message.reply_text('ID шутки должен быть числом. Попробуйте снова.')
-        return ADD_COMMENT
+        return ADD_COMMENT_MEME_ID
     
     meme_id = int(user_message)
     
@@ -146,7 +201,7 @@ async def handle_comment_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute('SELECT id FROM Memes WHERE id = ?', (meme_id,))
     if not cursor.fetchone():
         await update.message.reply_text('Шутка с таким ID не найдена. Попробуйте снова.')
-        return ADD_COMMENT
+        return ADD_COMMENT_MEME_ID
     
     # Сохраняем ID шутки в контексте
     context.user_data['meme_id'] = meme_id
@@ -155,7 +210,7 @@ async def handle_comment_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ADD_COMMENT_TEXT
 
 # Обработчик текстового сообщения для текста комментария
-async def handle_comment_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_comment_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     comment_text = update.message.text
     meme_id = context.user_data['meme_id']
     user_id = update.message.from_user.id
@@ -167,20 +222,9 @@ async def handle_comment_text(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text('Комментарий успешно добавлен!')
     return ConversationHandler.END
 
-
-async def get_jokes_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cursor.execute('SELECT * FROM jokes')
-    rows = cursor.fetchall()
-    print("All jokes in the table:")
-    all_rows=""
-    for row in rows:
-        all_rows += f"ID: {row[0]}, Who: {row[1]}, Joke: {row[2]}, Why: {row[3]}, Created At: {row[4]}\n"
-        
-    print(all_rows)
-    await update.message.reply_text(all_rows)
     
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print(f'Update:\n{update}\nCaused error:\n{context.error}')
+    print(f'SOME ERROR HAPPENED\nUPDATE:\n{update}\nCAUSED ERROR:\n{context.error}')
 
 
 
@@ -190,34 +234,44 @@ def main():
     app = Application.builder().token(config.TOKEN).build()
     
     # Conversations
-    conv_handler = ConversationHandler(
+    app_add_meme_handler = ConversationHandler(
         entry_points=[CommandHandler('add_meme', add_meme_command)],
         states={
-            ADD_MEME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_meme)],
+            ADD_MEME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_meme_handler)],
         },
         fallbacks=[],
     )
-    comment_handler = ConversationHandler(
+    app_get_user_memes_handler = ConversationHandler(
+        entry_points=[CommandHandler('get_user_memes', get_user_memes_command)],
+        states={
+            GET_USER_MEMES_BY_USERNAME_OR_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_user_memes_by_username_or_id_handler),
+            ],
+        },
+        fallbacks=[],
+    )
+    app_add_comment_handler = ConversationHandler(
         entry_points=[CommandHandler('add_comment', add_comment_command)],
         states={
-            ADD_COMMENT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_comment_id),
+            ADD_COMMENT_MEME_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_comment_id_handler),
             ],
             ADD_COMMENT_TEXT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_comment_text),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_comment_text_handler),
             ],
         },
         fallbacks=[],
     )
     
     # Добавляем обработчики
-    app.add_handler(conv_handler)
-    app.add_handler(comment_handler)
+    app.add_handler(app_add_meme_handler)
+    app.add_handler(app_get_user_memes_handler)
+    app.add_handler(app_add_comment_handler)
     
 
     # Commands
     app.add_handler(CommandHandler('start', start_command))
-    app.add_handler(CommandHandler('get_jokes_all', get_jokes_all_command))
+    app.add_handler(CommandHandler('get_my_memes', get_my_memes_command))
 
 
     # Errors
