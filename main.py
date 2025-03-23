@@ -3,6 +3,7 @@ import sqlite3
 from datetime import datetime
 from enum import IntEnum, auto
 from telegram import Update
+from telegram import BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -104,6 +105,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
 
 # MEME
+# ADD
 async def add_meme_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'Формат: первая строка "кто придумал", вторая "шутка" (строкой считается текст до \\n).'
@@ -132,6 +134,24 @@ async def add_meme_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+# GET
+async def get_all_memes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    
+    cursor.execute('SELECT text, created_at, id FROM Memes')
+    memes = cursor.fetchall()
+    
+    if not memes:
+        await update.message.reply_text("Пока нет добавленных мемов.")
+        return
+    
+    memes_list = "Все мемы:\n"
+    for meme in memes:
+        memes_list += f"Текст: {meme[0]}\nДата создания: {meme[1]}\nID: {meme[2]}\n\n"
+    
+    await update.message.reply_text(memes_list)
+    
+    
 async def get_my_memes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     
@@ -185,6 +205,7 @@ async def get_user_memes_by_username_or_id_handler(update: Update, context: Cont
 
 
 # COMMENT
+# ADD
 async def add_comment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Введите ID мема, которую хотите прокомментировать:')
     return UserStates.ADD_COMMENT_MEME_ID
@@ -221,7 +242,7 @@ async def add_comment_text_handler(update: Update, context: ContextTypes.DEFAULT
 
 
 
-
+# GET
 async def get_meme_comments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Введите ID мема, комментарии которого хотите увидеть:')
     return UserStates.GET_MEME_COMMENTS_MEME_ID
@@ -263,11 +284,44 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+# HELP
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = """
+Доступные команды:
+/start - Начать работу с ботом
+/help - Показать список всех команд
+/add_meme - Добавить новый мем
+/get_all_memes - Показать все мемы
+/get_my_memes - Показать все ваши мемы
+/get_user_memes - Показать мемы другого пользователя
+/add_comment - Добавить комментарий к мему
+/get_meme_comments - Показать комментарии к мему
+"""
+    await update.message.reply_text(help_text)
 
+
+# AVAILABLE COMMANDS
+async def set_bot_commands(application: Application):
+    commands = [
+        BotCommand("start", "Начать работу с ботом"),
+        BotCommand("help", "Показать список всех команд"),
+        BotCommand("add_meme", "Добавить новый мем"),
+        BotCommand("get_all_memes", "Показать все мемы"),
+        BotCommand("get_my_memes", "Показать все ваши мемы"),
+        BotCommand("get_user_memes", "Показать мемы другого пользователя"),
+        BotCommand("add_comment", "Добавить комментарий к мему"),
+        BotCommand("get_meme_comments", "Показать комментарии к мему"),
+    ]
+    await application.bot.set_my_commands(commands)
+
+
+
+
+# MAIN
 def main():
     print('Starting bot...')
-    app = Application.builder().token(config.TOKEN).build()
-    
+    app = Application.builder().token(config.TOKEN).post_init(set_bot_commands).build()
+
     # Conversations
     add_meme_conversation = ConversationHandler(
         entry_points=[CommandHandler('add_meme', add_meme_command)],
@@ -316,7 +370,10 @@ def main():
 
     # Commands
     app.add_handler(CommandHandler('start', start_command))
+    app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('get_my_memes', get_my_memes_command))
+    app.add_handler(CommandHandler('get_all_memes', get_all_memes_command))
+    
 
 
     # Errors
@@ -325,7 +382,6 @@ def main():
     print('Polling...')
     app.run_polling(poll_interval=3)
     
-    # close database connection
     connection.close()
 
 
