@@ -19,7 +19,8 @@ class UserStates(IntEnum):
     GET_USER_MEMES_BY_USERNAME_OR_ID = auto()
     ADD_COMMENT_MEME_ID = auto()
     ADD_COMMENT_TEXT = auto()
-    GET_MEME_COMMENTS_MEME_ID = auto()
+    RATE_MEME_ID = auto()
+    RATE_MEME_VALUE = auto()
 
 
 
@@ -133,7 +134,6 @@ async def add_meme_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-
 # GET
 async def get_all_memes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -170,12 +170,11 @@ async def get_my_memes_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def get_user_memes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Мемы какого пользователя показать? Введите Username или ID пользователя:")
-    return UserStates.GET_USER_MEMES_BY_USERNAME_OR_ID
-
-async def get_user_memes_by_username_or_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text.strip()
-
+    if not context.args:
+        await update.message.reply_text('Укажите username или user_id после команды, например: /get_user_memes 123')
+        return
+    
+    user_input = context.args[0]
     if user_input.isdigit():
         user_id = int(user_input)
         cursor.execute('SELECT text, created_at, id FROM Memes WHERE user_id = ?', (user_id,))
@@ -207,14 +206,14 @@ async def get_user_memes_by_username_or_id_handler(update: Update, context: Cont
 # COMMENT
 # ADD
 async def add_comment_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Введите ID мема, которую хотите прокомментировать:')
+    await update.message.reply_text('Введите meme_id, который хотите прокомментировать:')
     return UserStates.ADD_COMMENT_MEME_ID
 
 async def add_comment_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     
     if not user_message.isdigit():
-        await update.message.reply_text('ID мема должен быть числом. Попробуйте снова.')
+        await update.message.reply_text('meme_id должно быть числом. Попробуйте снова.')
         return UserStates.ADD_COMMENT_MEME_ID
     meme_id = int(user_message)
     
@@ -244,16 +243,14 @@ async def add_comment_text_handler(update: Update, context: ContextTypes.DEFAULT
 
 # GET
 async def get_meme_comments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Введите ID мема, комментарии которого хотите увидеть:')
-    return UserStates.GET_MEME_COMMENTS_MEME_ID
-
-async def get_meme_comments_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
-    
-    if not user_message.isdigit():
-        await update.message.reply_text('ID мема должно быть числом. Попробуйте снова.')
-        return UserStates.GET_MEME_COMMENTS_MEME_ID
-    meme_id = int(user_message)
+    if not context.args:
+        await update.message.reply_text('Укажите meme_id после команды, например: /get_meme_comments 123')
+        return
+    meme_id = context.args[0]
+    if not meme_id.isdigit():
+        await update.message.reply_text('meme_id должно быть числом. Попробуйте снова.')
+        return
+    meme_id = int(meme_id)
     
     cursor.execute('SELECT id FROM Memes WHERE id = ?', (meme_id,))
     if not cursor.fetchone():
@@ -262,7 +259,6 @@ async def get_meme_comments_id_handler(update: Update, context: ContextTypes.DEF
     
     cursor.execute('SELECT comment_text, created_at, user_id, id FROM Comments WHERE meme_id = ?', (meme_id,))
     comments = cursor.fetchall()
-
     if not comments:
         await update.message.reply_text("У этого пользователя пока нет добавленных мемов.")
         return ConversationHandler.END
@@ -274,6 +270,101 @@ async def get_meme_comments_id_handler(update: Update, context: ContextTypes.DEF
     await update.message.reply_text(comments_list)
     return ConversationHandler.END
 
+
+
+
+
+
+# RATING
+# ADD
+async def rate_meme_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text('Введите meme_id, который хотите оценить:')
+    return UserStates.RATE_MEME_ID
+
+async def rate_meme_id_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    
+    if not user_message.isdigit():
+        await update.message.reply_text('meme_id должно быть числом. Попробуйте снова.')
+        return UserStates.RATE_MEME_ID
+    
+    meme_id = int(user_message)
+    
+    cursor.execute('SELECT id FROM Memes WHERE id = ?', (meme_id,))
+    if not cursor.fetchone():
+        await update.message.reply_text('Мем с таким ID не найден. Попробуйте снова.')
+        return UserStates.RATE_MEME_ID
+    
+    user_id = update.message.from_user.id
+    cursor.execute('SELECT id FROM Ratings WHERE meme_id = ? AND user_id = ?', (meme_id, user_id))
+    if cursor.fetchone():
+        await update.message.reply_text('Вы уже оценивали этот мем. Хотите изменить оценку? (да/нет)')
+        context.user_data['meme_id'] = meme_id
+        context.user_data['update_rating'] = True
+        return UserStates.RATE_MEME_VALUE
+    
+    context.user_data['meme_id'] = meme_id
+    context.user_data['update_rating'] = False
+    
+    await update.message.reply_text('Введите вашу оценку (от 1 до 5):')
+    return UserStates.RATE_MEME_VALUE
+
+async def rate_meme_value_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    
+    if not user_message.isdigit() or int(user_message) < 1 or int(user_message) > 5:
+        await update.message.reply_text('Оценка должна быть числом от 1 до 5. Попробуйте снова.')
+        return UserStates.RATE_MEME_VALUE
+    
+    rating = int(user_message)
+    meme_id = context.user_data['meme_id']
+    user_id = update.message.from_user.id
+    
+    if context.user_data.get('update_rating', False):
+        cursor.execute('''
+            UPDATE Ratings 
+            SET rating = ?
+            WHERE meme_id = ? AND user_id = ?
+        ''', (rating, meme_id, user_id))
+    else:
+        cursor.execute('''
+            INSERT INTO Ratings (meme_id, user_id, rating)
+            VALUES (?, ?, ?)
+        ''', (meme_id, user_id, rating))
+    
+    connection.commit()
+    
+    await update.message.reply_text('Спасибо за вашу оценку!')
+    return ConversationHandler.END
+
+# GET
+async def get_meme_rating_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text('Укажите meme_id после команды, например: /get_meme_rating 123')
+        return
+    
+    meme_id = context.args[0]
+    
+    if not meme_id.isdigit():
+        await update.message.reply_text('meme_id должен быть числом.')
+        return
+    
+    cursor.execute('''
+        SELECT AVG(rating), COUNT(rating)
+        FROM Ratings
+        WHERE meme_id = ?
+    ''', (int(meme_id),))
+    
+    result = cursor.fetchone()
+    avg_rating, count = result if result else (None, 0)
+    
+    if avg_rating is None:
+        await update.message.reply_text('Этот мем еще не оценивали.')
+    else:
+        await update.message.reply_text(
+            f'Средняя оценка мема: {avg_rating:.1f}\n'
+            f'Количество оценок: {count}'
+        )
 
     
     
@@ -293,9 +384,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /add_meme - Добавить новый мем
 /get_all_memes - Показать все мемы
 /get_my_memes - Показать все ваши мемы
-/get_user_memes - Показать мемы другого пользователя
+/get_user_memes - Показать мемы другого пользователя $name_or_id
 /add_comment - Добавить комментарий к мему
-/get_meme_comments - Показать комментарии к мему
+/get_meme_comments - Показать комментарии к мему $meme_id
+/rate_meme - Оценить мем (от 1 до 5)
+/get_meme_rating - Показать рейтинг мема $meme_id
 """
     await update.message.reply_text(help_text)
 
@@ -308,9 +401,11 @@ async def set_bot_commands(application: Application):
         BotCommand("add_meme", "Добавить новый мем"),
         BotCommand("get_all_memes", "Показать все мемы"),
         BotCommand("get_my_memes", "Показать все ваши мемы"),
-        BotCommand("get_user_memes", "Показать мемы другого пользователя"),
+        BotCommand("get_user_memes", "Показать мемы пользователя $name_or_id"),
         BotCommand("add_comment", "Добавить комментарий к мему"),
-        BotCommand("get_meme_comments", "Показать комментарии к мему"),
+        BotCommand("get_meme_comments", "Показать комментарии к мему $meme_id"),
+        BotCommand("rate_meme", "Оценить мем (от 1 до 5)"),
+        BotCommand("get_meme_rating", "Показать рейтинг мема $meme_id"),
     ]
     await application.bot.set_my_commands(commands)
 
@@ -322,7 +417,21 @@ def main():
     print('Starting bot...')
     app = Application.builder().token(config.TOKEN).post_init(set_bot_commands).build()
 
-    # Conversations
+
+
+    # Commands
+    app.add_handler(CommandHandler('start', start_command))
+    app.add_handler(CommandHandler('help', help_command))
+    app.add_handler(CommandHandler('get_my_memes', get_my_memes_command))
+    app.add_handler(CommandHandler('get_user_memes', get_user_memes_command))
+    app.add_handler(CommandHandler('get_all_memes', get_all_memes_command))
+    app.add_handler(CommandHandler('get_meme_comments', get_meme_comments_command))
+    app.add_handler(CommandHandler('get_meme_rating', get_meme_rating_command))
+    
+    
+
+    # Сonversations
+    # memes
     add_meme_conversation = ConversationHandler(
         entry_points=[CommandHandler('add_meme', add_meme_command)],
         states={
@@ -330,15 +439,8 @@ def main():
         },
         fallbacks=[],
     )
-    get_user_memes_conversation = ConversationHandler(
-        entry_points=[CommandHandler('get_user_memes', get_user_memes_command)],
-        states={
-            UserStates.GET_USER_MEMES_BY_USERNAME_OR_ID: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_user_memes_by_username_or_id_handler),
-            ],
-        },
-        fallbacks=[],
-    )
+    app.add_handler(add_meme_conversation)
+    # comments
     add_comment_conversation = ConversationHandler(
         entry_points=[CommandHandler('add_comment', add_comment_command)],
         states={
@@ -351,29 +453,22 @@ def main():
         },
         fallbacks=[],
     )
-    get_comments_conversation = ConversationHandler(
-        entry_points=[CommandHandler('get_meme_comments', get_meme_comments_command)],
+    app.add_handler(add_comment_conversation)
+    # ratings
+    rate_meme_conversation = ConversationHandler(
+        entry_points=[CommandHandler('rate_meme', rate_meme_command)],
         states={
-            UserStates.GET_MEME_COMMENTS_MEME_ID: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_meme_comments_id_handler),
+            UserStates.RATE_MEME_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, rate_meme_id_handler),
+            ],
+            UserStates.RATE_MEME_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, rate_meme_value_handler),
             ],
         },
         fallbacks=[],
     )
-    
-    # Добавляем обработчики
-    app.add_handler(add_meme_conversation)
-    app.add_handler(get_user_memes_conversation)
-    app.add_handler(add_comment_conversation)
-    app.add_handler(get_comments_conversation)
-    
+    app.add_handler(rate_meme_conversation)
 
-    # Commands
-    app.add_handler(CommandHandler('start', start_command))
-    app.add_handler(CommandHandler('help', help_command))
-    app.add_handler(CommandHandler('get_my_memes', get_my_memes_command))
-    app.add_handler(CommandHandler('get_all_memes', get_all_memes_command))
-    
 
 
     # Errors
